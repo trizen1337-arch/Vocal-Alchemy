@@ -1,5 +1,9 @@
 package com.vocalalchemy.app
 
+import android.content.Intent
+import android.app.Activity
+import android.webkit.ValueCallback
+import android.net.Uri
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -17,6 +21,7 @@ import androidx.webkit.WebViewAssetLoader
 class MainActivity : Activity() {
     private lateinit var web: WebView
     private var pendingMicRequest: PermissionRequest? = null
+    private var pendingFiles: ValueCallback<Array<Uri>>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,6 +33,19 @@ class MainActivity : Activity() {
         web.settings.allowContentAccess = false
         web.settings.mediaPlaybackRequiresUserGesture = true
         web.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(view: WebView?, callback: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
+                pendingFiles?.onReceiveValue(null)
+                pendingFiles = callback
+                return try {
+                    startActivityForResult(params?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply { type = "audio/*"; addCategory(Intent.CATEGORY_OPENABLE) }, 102)
+                    true
+                } catch (e: Exception) {
+                    pendingFiles?.onReceiveValue(null)
+                    pendingFiles = null
+                    false
+                }
+            }
+
             override fun onPermissionRequest(request: PermissionRequest) {
                 runOnUiThread {
                     if (!request.origin.toString().startsWith("https://appassets.androidplatform.net/")) {
@@ -68,7 +86,19 @@ class MainActivity : Activity() {
         }
     }
 
+    @Deprecated("Legacy activity result API for WebView file chooser")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 102) {
+            val callback = pendingFiles
+            pendingFiles = null
+            callback?.onReceiveValue(if (resultCode == RESULT_OK) WebChromeClient.FileChooserParams.parseResult(resultCode, data) else null)
+        }
+    }
+
     override fun onDestroy() {
+        pendingFiles?.onReceiveValue(null)
+
         pendingMicRequest?.deny()
         web.destroy()
         super.onDestroy()
